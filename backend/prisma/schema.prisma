@@ -1,0 +1,130 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+enum AppRole {
+  ADMIN
+  MODERATOR
+  USER
+}
+
+enum BlockchainNetwork {
+  ETHEREUM
+  POLYGON
+  SOLANA
+}
+
+enum ConversionStatus {
+  UPLOADING
+  PARSING
+  EXTRACTING
+  GENERATING
+  DEPLOYING
+  COMPLETED
+  FAILED
+}
+
+enum ProcessingStep {
+  UPLOAD
+  PARSE_PDF
+  EXTRACT_DATA
+  GENERATE_CONTRACT
+  DEPLOY
+  COMPLETED
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  name          String?
+  avatar        String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  roles         UserRole[]
+  conversions   Conversion[]
+  
+  @@map("users")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  role      AppRole  @default(USER)
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, role])
+  @@map("user_roles")
+}
+
+model Conversion {
+  id                String           @id @default(cuid())
+  userId            String
+  originalFileName  String
+  fileUrl           String?
+  status            ConversionStatus @default(UPLOADING)
+  processingStep    ProcessingStep   @default(UPLOAD)
+  contractType      String?
+  errorMessage      String?          @db.Text
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  extractedData     ExtractedData?
+  deployedContract  DeployedContract?
+  
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("conversions")
+}
+
+model ExtractedData {
+  id              String   @id @default(cuid())
+  conversionId    String   @unique
+  parties         String
+  contractType    String
+  paymentAmount   String?
+  duration        String?
+  obligations     String   @db.Text
+  startDate       DateTime?
+  endDate         DateTime?
+  additionalTerms Json?
+  createdAt       DateTime @default(now())
+  
+  conversion      Conversion @relation(fields: [conversionId], references: [id], onDelete: Cascade)
+  
+  @@map("extracted_data")
+}
+
+model DeployedContract {
+  id                String            @id @default(cuid())
+  conversionId      String            @unique
+  contractAddress   String
+  blockchain        BlockchainNetwork
+  transactionHash   String
+  solidityCode      String            @db.Text
+  compiledBytecode  String?           @db.Text
+  deployedAt        DateTime          @default(now())
+  gasUsed           String?
+  deploymentCost    String?
+  compilerVersion   String?
+  
+  conversion        Conversion        @relation(fields: [conversionId], references: [id], onDelete: Cascade)
+  
+  @@index([contractAddress])
+  @@index([blockchain])
+  @@map("deployed_contracts")
+}
+
