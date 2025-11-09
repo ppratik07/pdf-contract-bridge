@@ -79,7 +79,7 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
 
     // Step 5: Save to database
     console.log("Step 5: Saving to database...");
-    const conversion = await prisma.contractConversion.create({
+    const conversion = await prisma..create({
       data: {
         fileName,
         fileHash: req.file.filename,
