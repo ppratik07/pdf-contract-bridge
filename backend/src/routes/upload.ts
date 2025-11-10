@@ -3,10 +3,8 @@ import multer from "multer";
 import * as path from "path";
 import * as fs from "fs";
 import { parsePdfFile } from "../services/pdfParser";
-import { generateSolidityContract } from "../services/solidityGenerator";
-import { deployContract } from "../services/blockchainDeployment";
-import prisma from "../lib/prisma";
 import { extractContractData } from "../services/contractExtractor";
+import prisma from "../lib/prisma";
 
 const router = Router();
 
@@ -41,8 +39,6 @@ const upload = multer({
 });
 
 interface UploadRequestBody {
-  blockchain?: string;
-  deploy?: boolean;
   userId?: string;
 }
 
@@ -52,91 +48,42 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const { blockchain = "ETHEREUM", deploy = false, userId = "default-user" } =
-      req.body as UploadRequestBody;
+    const { userId = "default-user" } = req.body as UploadRequestBody;
     const filePath = req.file.path;
     const fileName = req.file.originalname;
 
     console.log("Step 1: Parsing PDF...");
     const parsedPdf = await parsePdfFile(filePath);
+
     console.log("Step 2: Extracting contract data...");
     const contractData = await extractContractData(parsedPdf.text);
 
-    // Step 3: Generate Solidity contract
-    console.log("Step 3: Generating Solidity contract...");
-    const solidityCode = await generateSolidityContract(contractData);
-
-    let deploymentAddress: string | null = null;
-    let deploymentTx: string | null = null;
-
-    // Step 4: Deploy if requested
-    if (deploy) {
-      console.log("Step 4: Deploying contract...");
-      const deploymentResult = await deployContract(solidityCode, blockchain.toLowerCase());
-      deploymentAddress = deploymentResult.address;
-      deploymentTx = deploymentResult.transactionHash;
-    }
-
-    // Step 5: Create conversion record
-    console.log("Step 5: Saving to database...");
+    console.log("Step 3: Saving to database...");
     const conversion = await prisma.conversion.create({
       data: {
         userId,
         originalFileName: fileName,
         fileUrl: `/uploads/${req.file.filename}`,
         contractType: contractData.type,
-        status: "GENERATING",
-        processingStep: "GENERATE_CONTRACT",
+        status: "COMPLETED",
+        processingStep: "COMPLETED",
         extractedData: {
           create: {
             parties: contractData.parties.join(", "),
             contractType: contractData.type,
-            paymentAmount: contractData.paymentTerms || undefined,
-            obligations: JSON.stringify(contractData.keyTerms),
+            paymentAmount: contractData.terms.payment || undefined,
+            obligations: JSON.stringify(contractData.terms.obligations || []),
             startDate: new Date(),
           },
         },
       },
     });
 
-    // Step 6: Deploy contract if requested
-    if (deploy && deploymentAddress && deploymentTx) {
-      await prisma.deployedContract.create({
-        data: {
-          conversionId: conversion.id,
-          contractAddress: deploymentAddress,
-          blockchain: blockchain as any,
-          transactionHash: deploymentTx,
-          solidityCode,
-        },
-      });
-
-      // Update conversion status
-      await prisma.conversion.update({
-        where: { id: conversion.id },
-        data: {
-          status: "COMPLETED",
-          processingStep: "COMPLETED",
-        },
-      });
-    } else {
-      // Update conversion status to generating complete
-      await prisma.conversion.update({
-        where: { id: conversion.id },
-        data: {
-          status: "COMPLETED",
-          processingStep: "COMPLETED",
-        },
-      });
-    }
-
     // Clean up uploaded file after processing
     fs.unlinkSync(filePath);
-
-    // Step 7: Return response in the desired format
     res.status(200).json({
       success: true,
-      message: "Contract processed successfully",
+      message: "Contract extracted successfully",
       data: {
         conversionId: conversion.id,
         fileName: conversion.originalFileName,
@@ -150,10 +97,6 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
           endDate: contractData.terms.endDate,
           obligations: contractData.terms.obligations,
         },
-        blockchain: deploy ? blockchain : null,
-        deploymentAddress: deploy ? deploymentAddress : null,
-        deploymentTxHash: deploy ? deploymentTx : null,
-        solidityCode: deploy ? solidityCode : null,
         status: conversion.status,
         createdAt: conversion.createdAt,
       },
