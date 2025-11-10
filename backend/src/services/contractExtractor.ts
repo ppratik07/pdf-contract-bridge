@@ -15,16 +15,30 @@ interface ContractData {
   summary: string;
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy-load OpenAI client - don't instantiate at import time
+let openaiClient: OpenAI | null = null;
 
-//  Extract structured contract data from PDF text using OpenAI
+function getOpenAIClient(): OpenAI | null {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return openaiClient;
+}
 
+/**
+ * Extract structured contract data from PDF text using OpenAI
+ */
 export async function extractContractData(
   pdfText: string
 ): Promise<ContractData> {
-  if (!process.env.OPENAI_API_KEY) {
+  const openai = getOpenAIClient();
+  
+  if (!openai) {
     console.warn("OPENAI_API_KEY not set, falling back to pattern matching...");
     return extractContractDataWithPatterns(pdfText);
   }
@@ -87,7 +101,7 @@ Return ONLY valid JSON with this structure:
 /**
  * Fallback pattern-based extraction
  */
-function extractContractDataWithPatterns(pdfText: string): ContractData {
+    function extractContractDataWithPatterns(pdfText: string): ContractData {
   const cleanText = pdfText.replace(/\s+/g, " ").trim();
 
   return {
@@ -244,6 +258,11 @@ export async function extractContractDataWithCustomPrompt(
   }
 
   try {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      return extractContractDataWithPatterns(pdfText);
+    }
+
     const response = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [

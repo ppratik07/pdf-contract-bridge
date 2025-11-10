@@ -5,6 +5,9 @@ import * as fs from "fs";
 import { parsePdfFile } from "../services/pdfParser";
 import { extractContractData } from "../services/contractExtractor";
 import prisma from "../lib/prisma";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const router = Router();
 
@@ -48,7 +51,7 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    const { userId = "default-user" } = req.body as UploadRequestBody;
+    const { userId } = req.body as UploadRequestBody;
     const filePath = req.file.path;
     const fileName = req.file.originalname;
 
@@ -59,25 +62,28 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
     const contractData = await extractContractData(parsedPdf.text);
 
     console.log("Step 3: Saving to database...");
-    const conversion = await prisma.conversion.create({
-      data: {
-        userId,
-        originalFileName: fileName,
-        fileUrl: `/uploads/${req.file.filename}`,
-        contractType: contractData.type,
-        status: "COMPLETED",
-        processingStep: "COMPLETED",
-        extractedData: {
-          create: {
-            parties: contractData.parties.join(", "),
-            contractType: contractData.type,
-            paymentAmount: contractData.terms.payment || undefined,
-            obligations: JSON.stringify(contractData.terms.obligations || []),
-            startDate: new Date(),
-          },
+    const conversionData: any = {
+      originalFileName: fileName,
+      fileUrl: `/uploads/${req.file.filename}`,
+      contractType: contractData.type,
+      status: "COMPLETED",
+      processingStep: "COMPLETED",
+      extractedData: {
+        create: {
+          parties: contractData.parties.join(", "),
+          contractType: contractData.type,
+          paymentAmount: contractData.terms.payment || undefined,
+          obligations: JSON.stringify(contractData.terms.obligations || []),
+          startDate: new Date(),
         },
       },
-    });
+    };
+
+    if (userId) {
+      conversionData.userId = userId;
+    }
+
+    const conversion = await prisma.conversion.create({ data: conversionData });
 
     // Clean up uploaded file after processing
     fs.unlinkSync(filePath);
