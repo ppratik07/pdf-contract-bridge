@@ -1,56 +1,118 @@
+import OpenAI from "openai";
+
 interface ContractData {
   type: string;
   parties: string[];
-  paymentTerms: string | null;
-  keyTerms: Record<string, string>;
+  terms: {
+    payment?: string;
+    duration?: string;
+    trigger?: string;
+    startDate?: string;
+    endDate?: string;
+    obligations?: string[];
+    [key: string]: any;
+  };
   summary: string;
 }
 
-/**
- * Extract structured contract data from PDF text using pattern matching and NLP
- * This is a basic implementation that can be enhanced with actual AI/NLP services
- * like OpenAI GPT, Hugging Face, or specialized legal contract APIs
- */
-export async function extractContractData(pdfText: string): Promise<ContractData> {
-  // Remove extra whitespace
-  const cleanText = pdfText.replace(/\s+/g, ' ').trim();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-  // Extract contract type
-  const contractType = extractContractType(cleanText);
+//  Extract structured contract data from PDF text using OpenAI
 
-  // Extract parties
-  const parties = extractParties(cleanText);
+export async function extractContractData(
+  pdfText: string
+): Promise<ContractData> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn("OPENAI_API_KEY not set, falling back to pattern matching...");
+    return extractContractDataWithPatterns(pdfText);
+  }
 
-  // Extract payment terms
-  const paymentTerms = extractPaymentTerms(cleanText);
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `You are a legal contract analyst. Extract structured information from contracts.
+Return ONLY valid JSON with this structure:
+{
+  "type": "Service Agreement|Purchase Agreement|Employment Contract|Lease Agreement|NDA|Loan Agreement|Other",
+  "parties": ["Party 1", "Party 2"],
+  "terms": {
+    "payment": "2000 USDC or amount",
+    "duration": "10 days or time period",
+    "trigger": "after delivery or trigger condition",
+    "startDate": "date or null",
+    "endDate": "date or null",
+    "obligations": ["obligation 1", "obligation 2"]
+  }
+}`,
+        },
+        {
+          role: "user",
+          content: `Extract from this text:\n\n${pdfText.substring(0, 2000)}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 1000,
+    });
 
-  // Extract key terms
-  const keyTerms = extractKeyTerms(cleanText);
+    const content = response.choices[0]?.message?.content || "";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
 
-  // Create summary
-  const summary = createSummary(contractType, parties, paymentTerms);
+    if (!jsonMatch) {
+      return extractContractDataWithPatterns(pdfText);
+    }
 
-  return {
-    type: contractType,
-    parties,
-    paymentTerms,
-    keyTerms,
-    summary,
-  };
+    const extractedData = JSON.parse(jsonMatch[0]) as ContractData;
+
+    if (
+      !extractedData.type ||
+      !extractedData.parties ||
+      extractedData.parties.length === 0
+    ) {
+      return extractContractDataWithPatterns(pdfText);
+    }
+
+    extractedData.summary = createSummary(extractedData);
+    return extractedData;
+  } catch (error) {
+    console.error("OpenAI extraction error:", error);
+    return extractContractDataWithPatterns(pdfText);
+  }
 }
 
 /**
- * Extract contract type from text
+ * Fallback pattern-based extraction
  */
+function extractContractDataWithPatterns(pdfText: string): ContractData {
+  const cleanText = pdfText.replace(/\s+/g, " ").trim();
+
+  return {
+    type: extractContractType(cleanText),
+    parties: extractParties(cleanText),
+    terms: {
+      payment: extractPaymentTerms(cleanText),
+      duration: extractDuration(cleanText),
+      trigger: extractTrigger(cleanText),
+      startDate: extractStartDate(cleanText),
+      endDate: extractEndDate(cleanText),
+      obligations: extractObligations(cleanText),
+    },
+    summary: "",
+  };
+}
+
 function extractContractType(text: string): string {
   const types = [
-    { pattern: /service\s+agreement/i, type: 'ServiceAgreement' },
-    { pattern: /purchase\s+agreement/i, type: 'PurchaseAgreement' },
-    { pattern: /employment\s+contract/i, type: 'EmploymentContract' },
-    { pattern: /lease\s+agreement/i, type: 'LeaseAgreement' },
-    { pattern: /non[^a-z]*disclosure/i, type: 'NDA' },
-    { pattern: /loan\s+agreement/i, type: 'LoanAgreement' },
-    { pattern: /payment\s+terms/i, type: 'PaymentTerms' },
+    { pattern: /service\s+agreement/i, type: "Service Agreement" },
+    { pattern: /purchase\s+agreement/i, type: "Purchase Agreement" },
+    { pattern: /employment\s+contract/i, type: "Employment Contract" },
+    { pattern: /lease\s+agreement/i, type: "Lease Agreement" },
+    { pattern: /non[^a-z]*disclosure/i, type: "NDA" },
+    { pattern: /loan\s+agreement/i, type: "Loan Agreement" },
   ];
 
   for (const { pattern, type } of types) {
@@ -59,82 +121,149 @@ function extractContractType(text: string): string {
     }
   }
 
-  return 'GeneralContract';
+  return "Service Agreement";
 }
 
-/**
- * Extract parties from contract text
- */
 function extractParties(text: string): string[] {
   const parties: string[] = [];
 
-  // Common patterns for party identification
   const patterns = [
     /(?:between|by and between)\s+([^,]+)\s+(?:and|AND)\s+([^,.\n]+)/i,
-    /(?:party|Party)(?:\s+(?:of|of the))?\s+(?:first|1(?:st)?|a)\s*[:=]?\s*([^,.\n]+)/i,
-    /(?:party|Party)(?:\s+(?:of|of the))?\s+(?:second|2(?:nd)?|b)\s*[:=]?\s*([^,.\n]+)/i,
+    /(?:party|Party)\s+(?:first|1st)\s*[:=]?\s*([^,.\n]+)/i,
+    /(?:party|Party)\s+(?:second|2nd)\s*[:=]?\s*([^,.\n]+)/i,
   ];
 
   for (const pattern of patterns) {
     const matches = text.match(pattern);
     if (matches) {
-      parties.push(...matches.slice(1).map(p => p.trim()).filter(p => p.length > 0));
+      parties.push(
+        ...matches
+          .slice(1)
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0)
+      );
     }
   }
 
   return [...new Set(parties)];
 }
 
-/**
- * Extract payment terms from contract text
- */
-function extractPaymentTerms(text: string): string | null {
-  const paymentPattern = /(?:payment|Payment).*?(?:terms|Terms|conditions|Conditions)[:=]?\s*([^.\n]+)/i;
-  const match = text.match(paymentPattern);
-  return match ? match[1].trim() : null;
-}
+function extractPaymentTerms(text: string): string | undefined {
+  const patterns = [
+    /(?:payment|amount)\s*[:=]?\s*(?:\$|USD|EUR|USDC)?\s*([0-9,]+(?:\.[0-9]{2})?)\s*([A-Z]{0,4})?/i,
+    /(\$?[0-9,]+(?:\.[0-9]{2})?)\s+(?:USD|EUR|USDC|dollars|euros)/i,
+  ];
 
-/**
- * Extract key terms and values from contract
- */
-function extractKeyTerms(text: string): Record<string, string> {
-  const keyTerms: Record<string, string> = {};
-
-  // Extract common contract terms
-  const termPatterns = {
-    duration: /(?:duration|term)\s*[:=]?\s*([^,.\n]+)/i,
-    startDate: /(?:start|commence)(?:ment)?\s+(?:date)?\s*[:=]?\s*([^,.\n]+)/i,
-    endDate: /(?:end|expiration|expires?|termination)\s+(?:date)?\s*[:=]?\s*([^,.\n]+)/i,
-    amount: /(?:amount|payment)\s*[:=]?\s*(?:\$|USD|EUR)?\s*([0-9,]+(?:\.[0-9]{2})?)/i,
-    venue: /(?:governed by|jurisdiction|law)\s*[:=]?\s*([^,.\n]+)/i,
-  };
-
-  for (const [key, pattern] of Object.entries(termPatterns)) {
+  for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
-      keyTerms[key] = match[1].trim();
+      return match[0].trim();
     }
   }
 
-  return keyTerms;
+  return undefined;
 }
 
-/**
- * Create a summary of the contract
- */
-function createSummary(type: string, parties: string[], paymentTerms: string | null): string {
-  const partiesText = parties.length > 0 ? ` between ${parties.join(', ')}` : '';
-  const paymentText = paymentTerms ? ` with payment terms: ${paymentTerms}` : '';
-
-  return `${type}${partiesText}${paymentText}`;
+function extractDuration(text: string): string | undefined {
+  const pattern =
+    /(?:duration|term|period|for)\s+(?:a\s+)?([0-9]+\s+(?:days?|weeks?|months?|years?))/i;
+  const match = text.match(pattern);
+  return match ? match[1].trim() : undefined;
 }
 
-/**
- * For enhanced extraction, integrate with AI services like OpenAI
- * This is a placeholder for future implementation
- */
-export async function extractContractDataWithAI(pdfText: string): Promise<ContractData> {
-  // TODO: Integrate with OpenAI API or similar service
-  // For now, fall back to pattern-based extraction
-  return extractContractData(pdfText);
+function extractTrigger(text: string): string | undefined {
+  const patterns = [
+    /(?:upon|after|on)\s+([^,.\n]*?(?:delivery|completion|signing|receipt|acceptance))/i,
+    /(?:payment\s+)?(?:trigger|condition)\s*[:=]?\s*([^,.\n]+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+
+  return undefined;
+}
+
+function extractStartDate(text: string): string | undefined {
+  const pattern =
+    /(?:start|commence)(?:ment|ing)?\s+(?:date)?\s*[:=]?\s*([^,.\n]+)/i;
+  const match = text.match(pattern);
+  return match ? match[1].trim() : undefined;
+}
+
+function extractEndDate(text: string): string | undefined {
+  const pattern =
+    /(?:end|expiration|expires?|termination|completion)\s+(?:date)?\s*[:=]?\s*([^,.\n]+)/i;
+  const match = text.match(pattern);
+  return match ? match[1].trim() : undefined;
+}
+
+function extractObligations(text: string): string[] {
+  const obligations: string[] = [];
+  const patterns = [
+    /(?:shall|must|required to|agrees to)\s+([^,.\n]{10,150})/gi,
+    /(?:obligation|duty|responsibility)\s*[:=]?\s*([^,.\n]{10,150})/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    // eslint-disable-next-line no-cond-assign
+    while ((match = pattern.exec(text)) !== null) {
+      const obligation = match[1].trim();
+      if (obligation.length > 10 && obligation.length < 200) {
+        obligations.push(obligation);
+      }
+    }
+  }
+
+  return [...new Set(obligations)].slice(0, 5);
+}
+
+function createSummary(data: ContractData): string {
+  const partiesText =
+    data.parties.length > 0 ? ` between ${data.parties.join(", ")}` : "";
+  const paymentText = data.terms.payment
+    ? ` - Payment: ${data.terms.payment}`
+    : "";
+  const durationText = data.terms.duration
+    ? ` - Duration: ${data.terms.duration}`
+    : "";
+
+  return `${data.type}${partiesText}${paymentText}${durationText}`;
+}
+
+export async function extractContractDataWithCustomPrompt(
+  pdfText: string,
+  customPrompt: string
+): Promise<ContractData> {
+  if (!process.env.OPENAI_API_KEY) {
+    return extractContractDataWithPatterns(pdfText);
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: customPrompt },
+        { role: "user", content: `Extract:\n\n${pdfText.substring(0, 2000)}` },
+      ],
+      temperature: 0.3,
+      max_tokens: 800,
+    });
+
+    const content = response.choices[0]?.message?.content || "";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) {
+      throw new Error("No JSON found");
+    }
+
+    return JSON.parse(jsonMatch[0]) as ContractData;
+  } catch (error) {
+    console.error("Custom extraction error:", error);
+    return extractContractDataWithPatterns(pdfText);
+  }
 }

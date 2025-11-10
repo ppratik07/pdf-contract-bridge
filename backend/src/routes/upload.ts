@@ -3,10 +3,10 @@ import multer from "multer";
 import * as path from "path";
 import * as fs from "fs";
 import { parsePdfFile } from "../services/pdfParser";
-import { extractContractData } from "../services/contractExtractor";
 import { generateSolidityContract } from "../services/solidityGenerator";
 import { deployContract } from "../services/blockchainDeployment";
 import prisma from "../lib/prisma";
+import { extractContractData } from "../services/contractExtractor";
 
 const router = Router();
 
@@ -57,11 +57,8 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
     const filePath = req.file.path;
     const fileName = req.file.originalname;
 
-    // Step 1: Parse PDF
     console.log("Step 1: Parsing PDF...");
     const parsedPdf = await parsePdfFile(filePath);
-
-    // Step 2: Extract contract data using pattern matching
     console.log("Step 2: Extracting contract data...");
     const contractData = await extractContractData(parsedPdf.text);
 
@@ -136,19 +133,27 @@ router.post("/", upload.single("file"), async (req: Request, res: Response) => {
     // Clean up uploaded file after processing
     fs.unlinkSync(filePath);
 
-    // Step 7: Return response
+    // Step 7: Return response in the desired format
     res.status(200).json({
       success: true,
       message: "Contract processed successfully",
       data: {
-        id: conversion.id,
+        conversionId: conversion.id,
         fileName: conversion.originalFileName,
-        contractType: conversion.contractType,
-        blockchain,
-        solidityCode,
-        contractData,
-        deploymentAddress,
-        deploymentTxHash: deploymentTx,
+        type: contractData.type,
+        parties: contractData.parties,
+        terms: {
+          payment: contractData.terms.payment,
+          duration: contractData.terms.duration,
+          trigger: contractData.terms.trigger,
+          startDate: contractData.terms.startDate,
+          endDate: contractData.terms.endDate,
+          obligations: contractData.terms.obligations,
+        },
+        blockchain: deploy ? blockchain : null,
+        deploymentAddress: deploy ? deploymentAddress : null,
+        deploymentTxHash: deploy ? deploymentTx : null,
+        solidityCode: deploy ? solidityCode : null,
         status: conversion.status,
         createdAt: conversion.createdAt,
       },
