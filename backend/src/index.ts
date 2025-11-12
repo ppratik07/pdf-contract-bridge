@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import uploadRouter from './routes/upload';
 import generateRouter from './routes/generate';
+import deployRouter from './routes/deploy';
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/upload', uploadRouter);
 app.use('/api/generate', generateRouter);
+app.use('/api/deploy', deployRouter);
 
 // Health check
 app.get('/health', (req, res) => {

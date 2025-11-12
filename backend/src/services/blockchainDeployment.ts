@@ -1,46 +1,48 @@
-/**
- * Mock blockchain deployment service
- * In production, this would integrate with web3.js and actual blockchain networks
- */
+import { ethers } from "ethers";
+import { deployToEthereumSepolia } from "./deployToEtherium";
+import { deployToPolygonMumbai } from "./deployToPolygon";
 
-interface DeploymentResult {
-  address: string;
-  transactionHash: string;
+
+export interface DeploymentResult {
+  success: boolean;
+  contractAddress?: string;
+  transactionHash?: string;
+  blockNumber?: number;
+  gasUsed?: string;
+  error?: string;
+  network?: string;
+}
+
+export interface CompilationResult {
+  success: boolean;
+  abi?: any;
+  bytecode?: string;
+  contractName?: string;
+  error?: string;
+  warnings?: string[];
 }
 
 /**
- * Deploy compiled Solidity contract to blockchain
+ * Main deployment router based on blockchain selection
  */
-export async function deployContract(
+export async function deployContractToBlockchain(
   solidityCode: string,
-  blockchain: string = 'ethereum'
+  blockchain: "ethereum" | "polygon",
+  constructorArgs?: any[]
 ): Promise<DeploymentResult> {
-  // TODO: Implement actual deployment using web3.js
-  // This is a placeholder that returns mock data
-  
-  console.log(`Deploying to ${blockchain}...`);
-  
-  // Generate mock contract address
-  const mockAddress = '0x' + Array(40).fill(0).map(() => 
-    Math.floor(Math.random() * 16).toString(16)
-  ).join('');
-  
-  // Generate mock transaction hash
-  const mockTxHash = '0x' + Array(64).fill(0).map(() => 
-    Math.floor(Math.random() * 16).toString(16)
-  ).join('');
-  
-  return {
-    address: mockAddress,
-    transactionHash: mockTxHash,
-  };
+  console.log(`\n🚀 Starting deployment to ${blockchain}...`);
+
+  switch (blockchain.toLowerCase()) {
+    case "ethereum":
+      return deployToEthereumSepolia(solidityCode, constructorArgs);
+    case "polygon":
+      return deployToPolygonMumbai(solidityCode, constructorArgs);
+    default:
+      return {
+        success: false,
+        error: `Unknown blockchain: ${blockchain}. Use 'ethereum' or 'polygon'`,
+      };
+  }
 }
 
-/**
- * Compile Solidity contract
- * TODO: Use solc compiler for actual compilation
- */
-export async function compileSolidityContract(solidityCode: string): Promise<string> {
-  // Placeholder for actual compilation
-  return solidityCode;
-}
+
