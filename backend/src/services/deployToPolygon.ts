@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
-import { compileSolidityContract, DeploymentResult } from "./blockchainDeployment";
+import { DeploymentResult } from "./blockchainDeployment";
+import { compileSolidityContract } from "./compileSolidityContract";
 
 /**
  * Deploy contract to Polygon Mumbai testnet
